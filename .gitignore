@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+server.log
+usage.log
+app.sock
+keys.json
+paid.json
