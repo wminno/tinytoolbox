@@ -124,8 +124,12 @@ Uptime &amp; honest self-description included. Powered by a small Python stack o
 @app.get("/")
 def home():
     # Canonical URL is always the HTTPS subdomain (TLS terminates at the reverse proxy).
-    base = "https://" + request.host
+    base = "https://tinytoolbox.bigfloppy.net"
     return Response(PAGE.replace("HOST", base).replace("Replace HOST with this server's URL.", "That URL is canonical — use it as-is.").replace("%dMB", f"{MAX_MB}MB").replace("%s", PAYMENT_URL), mimetype="text/html")
+
+@app.errorhandler(ValueError)
+def bad_request(e):
+    return jsonify(error=str(e)), 400
 
 @app.get("/api/health")
 def health():
@@ -170,8 +174,6 @@ def pay():
 
 def get_files(field="file"):
     fs = [f for f in request.files.getlist(field) if f and f.filename]
-    if not fs:
-        fs = [f for k, f in request.files.items(multiple=True)]
     if not fs:
         raise ValueError("No file uploaded (use multipart field 'file')")
     return fs
