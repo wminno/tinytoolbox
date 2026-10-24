@@ -5,3 +5,6 @@ usage.log
 app.sock
 keys.json
 paid.json
+
+# runtime secret for /api/admin/issue
+admin_token.txt
