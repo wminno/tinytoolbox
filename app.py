@@ -4,7 +4,7 @@
 Free: landing, health, GET /api/trial (trial key: 30 calls, 1 per IP per 24h, 7 days).
 Paid ($3 one-time key): PDF merge/split/rotate/text-extract(+markdown), safe-scan, QR.
 """
-import io, json, os, re, secrets, time, threading, hmac
+import io, json, os, re, secrets, time, threading, hmac, base64
 from flask import Flask, request, send_file, jsonify, Response
 
 from pypdf import PdfReader, PdfWriter
@@ -466,6 +466,251 @@ def keys_page():
 <h2>Issued keys: {paid} paid, {trials} trial</h2><table border=1 cellpadding=6>
 <tr><th>key</th><th>status</th><th>created</th><th>label</th></tr>{rows}</table>
 <p><a href="/">← home</a></p></body></html>"""
+
+
+# ---------------------------------------------------------------- MCP server --
+# Streamable-HTTP MCP endpoint (/mcp) exposing the REST endpoints as MCP tools.
+# Tool calls proxy through THIS app's own routes via test_client, so API-key
+# auth, trial limits, usage logging and rate limits stay on a single code path.
+# Spec subset: JSON-RPC 2.0, initialize, ping, tools/list, tools/call.
+# Spec deviation (intentional): errors are JSON bodies with HTTP 200 + JSON-RPC
+# error objects, not 4xx/5xx — streamable-HTTP MCP clients treat non-2xx as
+# transport failure, while tool errors belong in the JSON-RPC result envelope.
+
+MCP_PROTOCOL_VERSION = "2025-03-26"
+MCP_TOOLS = [
+    {
+        "name": "pdf_merge",
+        "description": "Merge multiple PDF files (in order) into one PDF. Returns base64 of the merged PDF.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "files": {"type": "array", "items": {"type": "string"},
+                          "description": "PDF file contents as base64, in merge order (2+ files)"},
+            },
+            "required": ["files"],
+        },
+    },
+    {
+        "name": "pdf_split",
+        "description": "Extract selected pages from a PDF. Returns base64 of the extracted PDF.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string", "description": "PDF file content as base64"},
+                "pages": {"type": "string",
+                          "description": "1-based page spec like '1-3,5' (default: all pages)"},
+            },
+            "required": ["file"],
+        },
+    },
+    {
+        "name": "pdf_rotate",
+        "description": "Rotate some or all pages of a PDF by 90/180/270 degrees. Returns base64 of the rotated PDF.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string", "description": "PDF file content as base64"},
+                "angle": {"type": "integer", "enum": [90, 180, 270],
+                          "description": "rotation angle (default 90)"},
+                "pages": {"type": "string", "description": "1-based page spec like '1-3,5' (default: all pages)"},
+            },
+            "required": ["file"],
+        },
+    },
+    {
+        "name": "pdf_text",
+        "description": ("Extract text from a PDF, per page. Pass as_markdown=true for a clean "
+                        "Markdown version with '## Page N' headings."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string", "description": "PDF file content as base64"},
+                "as_markdown": {"type": "boolean", "description": "return Markdown instead of JSON (default false)"},
+            },
+            "required": ["file"],
+        },
+    },
+    {
+        "name": "pdf_info",
+        "description": "PDF metadata: page count, byte size, document info fields.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"file": {"type": "string", "description": "PDF file content as base64"}},
+            "required": ["file"],
+        },
+    },
+    {
+        "name": "pdf_safe_scan",
+        "description": ("Scan a PDF for hostile content: JavaScript, embedded files, Launch/Open actions, "
+                        "XFA forms, encryption. Returns verdict (likely_safe/suspicious/dangerous), risk_score "
+                        "and findings. Static heuristics, NOT an antivirus."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"file": {"type": "string", "description": "PDF file content as base64"}},
+            "required": ["file"],
+        },
+    },
+    {
+        "name": "qr_code",
+        "description": "Generate a QR code PNG for a text or URL. Returns base64 PNG (image/png).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "text or URL to encode"},
+                "size": {"type": "integer", "description": "image size in px, 64-1000 (default 300)"},
+            },
+            "required": ["text"],
+        },
+    },
+]
+
+
+def _mcp_b64(b):
+    return base64.b64encode(b).decode("ascii")
+
+
+def _mcp_result(payload, is_error=False, mime=None, b64=None):
+    """Wrap a payload as an MCP tools/call result (text or base64 image)."""
+    if b64 is not None:
+        content = [{"type": "image", "data": b64, "mimeType": mime or "application/octet-stream"}]
+    else:
+        content = [{"type": "text", "text": payload if isinstance(payload, str) else json.dumps(payload)}]
+    return {"content": content, "isError": bool(is_error)}
+
+
+def _mcp_client_call(method, path, key, **kw):
+    """Proxy a tool call through this app's own REST route (in-process).
+    dict values that are raw bytes become multipart file parts (filename required
+    for werkzeug to treat them as uploads)."""
+    data = kw.get("data") or {}
+    for k, v in list(data.items()):
+        if isinstance(v, (bytes, bytearray)):
+            data[k] = (io.BytesIO(bytes(v)), f"{k}.bin")
+    c = app.test_client()
+    return c.post(path, data=data, headers={"Authorization": "Bearer " + key})
+
+
+def _mcp_tool_call(name, args, key):
+    import base64 as _b64mod
+    try:
+        if name == "pdf_merge":
+            files = args.get("files") or []
+            if not isinstance(files, list) or len(files) < 2:
+                return _mcp_result({"error": "files: list of 2+ base64-encoded PDFs required"}, is_error=True)
+            blobs = [_b64mod.b64decode(str(f)) for f in files]
+            data = {"file": [(io.BytesIO(b), f"f{i}.pdf") for i, b in enumerate(blobs)]}
+            resp = _mcp_client_call("POST", "/api/pdf/merge", key, data=data)
+            if resp.status_code != 200:
+                return _mcp_result({"error": f"merge failed: HTTP {resp.status_code}"}, is_error=True)
+            return _mcp_result({"pdf_base64": _mcp_b64(resp.data), "bytes": len(resp.data)})
+
+        if name in ("pdf_split", "pdf_rotate", "pdf_text", "pdf_info", "pdf_safe_scan"):
+            fb = args.get("file")
+            if not fb:
+                return _mcp_result({"error": "file (base64 PDF) required"}, is_error=True)
+            raw = _b64mod.b64decode(str(fb))
+            path = {"pdf_split": "/api/pdf/split", "pdf_rotate": "/api/pdf/rotate",
+                    "pdf_text": "/api/pdf/text", "pdf_info": "/api/pdf/info",
+                    "pdf_safe_scan": "/api/pdf/safe"}[name]
+            data = {"file": raw}
+            if name == "pdf_split" and args.get("pages"):
+                data["pages"] = str(args["pages"])
+            if name == "pdf_rotate":
+                if args.get("angle"):
+                    data["angle"] = str(args["angle"])
+                if args.get("pages"):
+                    data["pages"] = str(args["pages"])
+            if name == "pdf_text" and args.get("as_markdown"):
+                data["fmt"] = "md"
+            resp = _mcp_client_call("POST", path, key, data=data)
+            if resp.status_code != 200:
+                try:
+                    err = resp.get_json(force=True)
+                except Exception:
+                    err = {}
+                return _mcp_result({"error": f"HTTP {resp.status_code}: {err.get('error', '')}"}, is_error=True)
+            if name in ("pdf_split", "pdf_rotate"):
+                return _mcp_result({"pdf_base64": _mcp_b64(resp.data), "bytes": len(resp.data)})
+            if name == "pdf_text":
+                if args.get("as_markdown"):
+                    return _mcp_result(resp.data.decode("utf-8", "replace"))
+                return _mcp_result(resp.get_json(force=True))
+            return _mcp_result(resp.get_json(force=True))
+
+        if name == "qr_code":
+            text_ = args.get("text")
+            if not text_:
+                return _mcp_result({"error": "text required"}, is_error=True)
+            size = args.get("size") or 300
+            from urllib.parse import quote
+            c = app.test_client()
+            resp = c.get(f"/api/qr?text={quote(text_)}&size={int(size)}",
+                         headers={"Authorization": "Bearer " + key})
+            if resp.status_code != 200:
+                try:
+                    err = resp.get_json(force=True)
+                except Exception:
+                    err = {}
+                return _mcp_result({"error": f"HTTP {resp.status_code}: {err.get('error', '')}"}, is_error=True)
+            return _mcp_result("QR PNG generated", mime="image/png", b64=_mcp_b64(resp.data))
+
+        return None  # unknown tool
+    except Exception as e:
+        return _mcp_result({"error": f"{type(e).__name__}: {e}"}, is_error=True)
+
+
+@app.post("/mcp")
+def mcp_post():
+    key = _get_key()
+    if not key:
+        return jsonify(jsonrpc="2.0", id=None,
+                       error={"code": -32001, "message": "Missing API key: pass ?key= or Authorization: Bearer "
+                                                          "(free trial at /api/trial)"}), 200
+    try:
+        req = request.get_json(force=True)
+    except Exception:
+        return jsonify(jsonrpc="2.0", id=None, error={"code": -32700, "message": "parse error"}), 200
+    if not isinstance(req, dict):
+        return jsonify(jsonrpc="2.0", id=None, error={"code": -32600, "message": "invalid request"}), 200
+    rid, method = req.get("id"), req.get("method")
+    params = req.get("params") or {}
+
+    def rpc_err(code, message):
+        return jsonify(jsonrpc="2.0", id=rid, error={"code": code, "message": message}), 200
+
+    def rpc_ok(result):
+        return jsonify(jsonrpc="2.0", id=rid, result=result), 200
+
+    if method == "initialize":
+        return rpc_ok({
+            "protocolVersion": params.get("protocolVersion") or MCP_PROTOCOL_VERSION,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "tinytoolbox", "version": "1.1",
+                           "description": "PDF merge/split/rotate/text/info/safe-scan + QR code tools; "
+                                          "$3 one-time key, free trial at https://tinytoolbox.bigfloppy.net/api/trial"},
+            "instructions": "Pass your API key as ?key= on the endpoint URL or Authorization: Bearer header. "
+                            "GET /api/trial mints a free trial key (30 calls).",
+        })
+    if method == "ping":
+        return rpc_ok({})
+    if method == "tools/list":
+        return rpc_ok({"tools": MCP_TOOLS})
+    if method == "tools/call":
+        name = params.get("name")
+        args = params.get("arguments") or {}
+        result = _mcp_tool_call(name, args, key)
+        if result is None:
+            return rpc_err(-32602, f"Unknown tool: {name}")
+        return rpc_ok(result)
+    return rpc_err(-32601, f"Method not found: {method}")
+
+
+@app.get("/mcp")
+def mcp_get():
+    return jsonify(error="MCP endpoint: use POST (streamable HTTP). Docs at /"), 405
+
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=int(os.environ.get("PORT", "8095")), threaded=True)
