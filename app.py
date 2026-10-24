@@ -4,7 +4,7 @@
 Free: landing, health, GET /api/trial (trial key: 30 calls, 1 per IP per 24h, 7 days).
 Paid ($3 one-time key): PDF merge/split/rotate/text-extract(+markdown), safe-scan, QR.
 """
-import io, json, os, re, secrets, time, threading
+import io, json, os, re, secrets, time, threading, hmac
 from flask import Flask, request, send_file, jsonify, Response
 
 from pypdf import PdfReader, PdfWriter
@@ -225,6 +225,38 @@ def trial():
     return jsonify(key=key, calls=TRIAL_CALLS, days=TRIAL_DAYS,
                    note="30 free calls, 7 days. Keep the key; same-IP re-asks return the same key.")
 
+
+ADMIN_TOKEN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin_token.txt")
+
+def _admin_ok(token):
+    try:
+        expected = open(ADMIN_TOKEN_FILE).read().strip()
+    except OSError:
+        return False
+    return bool(expected) and hmac.compare_digest(token, expected)
+
+@app.post("/api/admin/issue")
+def admin_issue():
+    tok = request.args.get("admin") or request.headers.get("X-Admin-Token") or ""
+    if not _admin_ok(tok):
+        return jsonify(error="forbidden"), 403
+    try:
+        n = max(1, min(20, int(request.args.get("n", "1"))))
+    except ValueError:
+        n = 1
+    with LOCK:
+        keys = load_keys()
+        made = []
+        for _ in range(n):
+            k = "ttk_" + secrets.token_hex(12)
+            keys[k] = {"active": True, "paid": True, "claimed": False,
+                       "paid_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                       "issued_via": "admin"}
+            made.append(k)
+        save_keys(keys)
+    log(f"admin issue n={n}")
+    return jsonify(issued=made, note="Keys visible at /claim for the payer.")
+
 @app.get("/claim")
 def claim():
     keys = load_keys()
@@ -240,9 +272,9 @@ def claim():
 def pay():
     return f"""<!doctype html><html><body style="font-family:system-ui;max-width:600px;margin:3rem auto;text-align:center">
 <h2>Get an API key — $3 one-time</h2>
-<p>Card checkout, key issued automatically right after payment. Or start with the <a href="/api/trial">free 30-call trial</a>:</p>
+<p>Card checkout, key issued right after payment (appears at /claim). Or start with the <a href="/api/trial">free 30-call trial</a>:</p>
 <p><a href="{PAYMENT_URL}" style="background:#0b62d6;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Pay $3 &amp; get key</a></p>
-<p style="color:#666;font-size:.9rem">One-time payment. Key arrives on screen immediately. Never expires.</p>
+<p style="color:#666;font-size:.9rem">One-time payment. Your key then appears at <a href="/claim">/claim</a> — usually within the hour. Never expires.</p>
 </body></html>"""
 
 def get_files(field="file"):
