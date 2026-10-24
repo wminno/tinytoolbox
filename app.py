@@ -46,8 +46,8 @@ def log(msg):
 @app.after_request
 def log_request(resp):
     try:
-        ip = request.headers.get("X-Forwarded-For", "-")
-        log(f'req {request.method} {request.path} {resp.status_code} ip={ip}')
+        ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "-").split(",")[0].strip()
+        log(f'{ip} {request.path} {request.method} {resp.status_code}')
     except Exception:
         pass
     return resp
