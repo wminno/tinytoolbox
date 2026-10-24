@@ -5,6 +5,7 @@ Free: landing, health, GET /api/trial (trial key: 30 calls, 1 per IP per 24h, 7 
 Paid ($3 one-time key): PDF merge/split/rotate/text-extract(+markdown), safe-scan, QR.
 """
 import io, json, os, re, secrets, time, threading, hmac, base64
+import os
 from flask import Flask, request, send_file, jsonify, Response
 
 from pypdf import PdfReader, PdfWriter
@@ -662,11 +663,6 @@ def _mcp_tool_call(name, args, key):
 
 @app.post("/mcp")
 def mcp_post():
-    key = _get_key()
-    if not key:
-        return jsonify(jsonrpc="2.0", id=None,
-                       error={"code": -32001, "message": "Missing API key: pass ?key= or Authorization: Bearer "
-                                                          "(free trial at /api/trial)"}), 200
     try:
         req = request.get_json(force=True)
     except Exception:
@@ -674,6 +670,13 @@ def mcp_post():
     if not isinstance(req, dict):
         return jsonify(jsonrpc="2.0", id=None, error={"code": -32600, "message": "invalid request"}), 200
     rid, method = req.get("id"), req.get("method")
+    key = _get_key()
+    # initialize / tools/list / ping stay public so MCP clients and directories can
+    # connect and enumerate without a key; tools/call still requires one.
+    if not key and method not in ("initialize", "tools/list", "ping"):
+        return jsonify(jsonrpc="2.0", id=rid,
+                       error={"code": -32001, "message": "Missing API key: pass ?key= or Authorization: Bearer "
+                                                          "(free trial at /api/trial)"}), 200
     params = req.get("params") or {}
 
     def rpc_err(code, message):
@@ -709,6 +712,21 @@ def mcp_post():
 @app.get("/mcp")
 def mcp_get():
     return jsonify(error="MCP endpoint: use POST (streamable HTTP). Docs at /"), 405
+
+
+_WK_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+@app.get("/.well-known/mcp-registry-auth")
+def wk_registry_auth():
+    # MCP Registry domain-based publish auth proof (ed25519 pubkey, charlie-3)
+    return send_file(os.path.join(_WK_DIR, "mcp-registry-auth"), mimetype="text/plain")
+
+
+@app.get("/.well-known/server.json")
+def wk_server_json():
+    # MCP Registry server metadata: net/bigfloppy/tinytoolbox, streamable-http /mcp
+    return send_file(os.path.join(_WK_DIR, "server.json"), mimetype="application/json")
 
 
 

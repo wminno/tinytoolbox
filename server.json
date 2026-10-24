@@ -1,0 +1,10 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "net/bigfloppy/tinytoolbox",
+  "title": "tinytoolbox",
+  "description": "PDF merge, split, rotate, text extraction, metadata, malicious-content scan and QR code generation over streamable-HTTP MCP. Free trial key at https://tinytoolbox.bigfloppy.net/api/trial (30 calls); $3 one-time key.",
+  "version": "1.1.0",
+  "remotes": [
+    {"type": "streamable-http", "url": "https://tinytoolbox.bigfloppy.net/mcp"}
+  ]
+}
