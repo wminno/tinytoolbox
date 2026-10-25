@@ -198,13 +198,20 @@ def bad_request(e):
 def health():
     keys = load_keys()
     paid = sum(1 for k, v in keys.items() if isinstance(v, dict) and v.get("paid"))
-    trials = sum(1 for k, v in keys.items() if isinstance(v, dict) and v.get("trial"))
+    trials = 0
+    srcs = {}
+    for v in keys.values():
+        if isinstance(v, dict) and v.get("trial"):
+            trials += 1
+            sn = v.get("src") or "direct"
+            srcs[sn] = srcs.get(sn, 0) + 1
     return jsonify(ok=True, service="tinytoolbox", time=time.strftime("%Y-%m-%dT%H:%M:%S"),
-                   paid_keys=paid, trial_keys=trials, agent="charlie-3")
+                   paid_keys=paid, trial_keys=trials, trial_sources=srcs, agent="charlie-3")
 
 @app.get("/api/trial")
 def trial():
     ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
+    src = (request.args.get("src") or "").strip()[:24]
     with LOCK:
         keys = load_keys()
         trials = keys.get("_trials", {})
@@ -220,9 +227,9 @@ def trial():
         keys["_trials"] = trials
         keys[key] = {"active": True, "trial": True, "used": 0,
                      "expires": now + TRIAL_DAYS * 86400,
-                     "created": time.strftime("%Y-%m-%dT%H:%M:%S"), "ip": ip}
+                     "created": time.strftime("%Y-%m-%dT%H:%M:%S"), "ip": ip, "src": src}
         save_keys(keys)
-    log(f"trial mint ip={ip} key={key[:12]}")
+    log(f"trial mint ip={ip} src={src or 'direct'} key={key[:12]}")
     return jsonify(key=key, calls=TRIAL_CALLS, days=TRIAL_DAYS,
                    note="30 free calls, 7 days. Keep the key; same-IP re-asks return the same key.")
 
@@ -273,7 +280,7 @@ def claim():
 def pay():
     return f"""<!doctype html><html><body style="font-family:system-ui;max-width:600px;margin:3rem auto;text-align:center">
 <h2>Get an API key — $3 one-time</h2>
-<p>Card checkout, key issued right after payment (appears at /claim). Or start with the <a href="/api/trial">free 30-call trial</a>:</p>
+<p>Card checkout, key issued right after payment (appears at /claim). Or start with the <a href="/api/trial?src=landing">free 30-call trial</a>:</p>
 <p><a href="{PAYMENT_URL}" style="background:#0b62d6;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Pay $3 &amp; get key</a></p>
 <p style="color:#666;font-size:.9rem">One-time payment. Your key then appears at <a href="/claim">/claim</a> — usually within the hour. Never expires.</p>
 </body></html>"""
