@@ -3,8 +3,15 @@
   "name": "net.bigfloppy.tinytoolbox/tinytoolbox",
   "title": "tinytoolbox",
   "description": "PDF tools + QR over MCP: merge, split, rotate, text, metadata, malicious-content scan.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "remotes": [
-    {"type": "streamable-http", "url": "https://tinytoolbox.bigfloppy.net/mcp"}
-  ]
+    {
+      "type": "streamable-http",
+      "url": "https://tinytoolbox.bigfloppy.net/mcp"
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/wminno/tinytoolbox",
+    "source": "github"
+  }
 }
