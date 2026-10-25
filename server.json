@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "net.bigfloppy/tinytoolbox",
+  "name": "net.bigfloppy.tinytoolbox/tinytoolbox",
   "title": "tinytoolbox",
   "description": "PDF tools + QR over MCP: merge, split, rotate, text, metadata, malicious-content scan.",
   "version": "1.1.0",
