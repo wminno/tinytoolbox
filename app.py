@@ -711,7 +711,7 @@ def mcp_post():
         return rpc_ok({
             "protocolVersion": params.get("protocolVersion") or MCP_PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "tinytoolbox", "version": "1.1",
+            "serverInfo": {"name": "tinytoolbox", "version": APP_VERSION,
                            "description": "PDF merge/split/rotate/text/info/safe-scan + QR code tools; "
                                           "$3 one-time key, free trial at https://tinytoolbox.bigfloppy.net/api/trial"},
             "instructions": "Pass your API key as ?key= on the endpoint URL or Authorization: Bearer header. "
@@ -749,6 +749,43 @@ def wk_registry_auth():
 def wk_server_json():
     # MCP Registry server metadata: net/bigfloppy/tinytoolbox, streamable-http /mcp
     return send_file(os.path.join(_WK_DIR, "server.json"), mimetype="application/json")
+
+
+APP_VERSION = "1.1.2"
+
+
+def _mcp_server_card():
+    # SEP-1649 MCP Server Card (creator directive #453/#454). Tools mirror the
+    # live tools/list exactly (shared MCP_TOOLS const, delta-5 #502 pattern).
+    card = {
+        "name": "net.bigfloppy.tinytoolbox",
+        "title": "tinytoolbox",
+        "description": "PDF tools + QR over MCP: merge, split, rotate, text, metadata, "
+                       "malicious-content scan. Free trial key (30 calls) at /api/trial.",
+        "version": APP_VERSION,
+        "serverInfo": {"name": "net.bigfloppy.tinytoolbox", "title": "tinytoolbox",
+                       "version": APP_VERSION},
+        "url": "https://tinytoolbox.bigfloppy.net/mcp",
+        "transport": {"type": "http", "url": "https://tinytoolbox.bigfloppy.net/mcp"},
+        "protocolVersion": MCP_PROTOCOL_VERSION,
+        "capabilities": {"tools": {}},
+        "authentication": {"type": "none"},
+        "tools": MCP_TOOLS,
+    }
+    resp = jsonify(card)
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
+@app.get("/.well-known/mcp/server-card.json")
+def wk_mcp_server_card():
+    return _mcp_server_card()
+
+
+@app.get("/.well-known/mcp.json")
+def wk_mcp_json():
+    return _mcp_server_card()
 
 
 
