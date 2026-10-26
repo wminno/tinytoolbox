@@ -162,6 +162,20 @@ curl -s -o merged.pdf -F file=@a.pdf -F file=@b.pdf \\
 curl -s -F file=@doc.pdf "HOST/api/pdf/safe?key=TRIAL_KEY"</pre>
 <p>Files up to ~%dMB.</p>
 
+<h3>Use as an MCP server <span class="tag">(Claude Desktop, Cursor, other MCP clients)</span></h3>
+<p>tinytoolbox is listed in the <a href="https://registry.modelcontextprotocol.io">official MCP Registry</a>
+as <code>net.bigfloppy.tinytoolbox/tinytoolbox</code> &mdash; streamable HTTP at
+<code>https://tinytoolbox.bigfloppy.net/mcp</code>. Connect, then <code>tools/list</code> works without a key;
+each <code>tools/call</code> needs one.</p>
+<p><a href="/api/trial?src=mcp-landing">Get a free trial key</a> (30 calls, no email, no signup), then point your client at:</p>
+<pre>https://tinytoolbox.bigfloppy.net/mcp?key=YOUR_KEY</pre>
+<p>Tools: <code>pdf_merge</code>, <code>pdf_split</code>, <code>pdf_rotate</code>, <code>pdf_text</code>,
+<code>pdf_info</code>, <code>pdf_safe_scan</code>, <code>qr_code</code> (all accept base64 file/text arguments,
+return base64 PDF/PNG). Claude Desktop example (mcpServers config):</p>
+<pre>"/net/bigfloppy/tinytoolbox": {
+  "url": "https://tinytoolbox.bigfloppy.net/mcp?key=YOUR_KEY"
+}</pre>
+
 <h3>Get a permanent key</h3>
 <p>Pay $3 once via card &mdash; <a href="%s">checkout link</a> &mdash; and your key is issued automatically after payment.
 Questions or abuse reports: the contact form on the payment page.</p>
@@ -468,11 +482,12 @@ def keys_page():
     trials = sum(1 for k, v in keys.items() if isinstance(v, dict) and v.get("trial"))
     rows = "".join(
         f"<tr><td>{k[:12]}…</td><td>{'trial' if v.get('trial') else ('active' if v.get('active',True) else 'disabled')}</td>"
-        f"<td>{v.get('created', v.get('paid_at','?'))}</td><td>{v.get('label','')}</td></tr>"
+        f"<td>{v.get('created', v.get('paid_at','?'))}</td><td>{v.get('label','')}</td>"
+        f"<td>{v.get('used',0)}</td><td>{v.get('src') or 'direct'}</td></tr>"
         for k, v in keys.items() if isinstance(v, dict) and not k.startswith("_"))
     return f"""<!doctype html><html><body style="font-family:system-ui;max-width:640px;margin:3rem auto">
 <h2>Issued keys: {paid} paid, {trials} trial</h2><table border=1 cellpadding=6>
-<tr><th>key</th><th>status</th><th>created</th><th>label</th></tr>{rows}</table>
+<tr><th>key</th><th>status</th><th>created</th><th>label</th><th>calls</th><th>src</th></tr>{rows}</table>
 <p><a href="/">← home</a></p></body></html>"""
 
 
