@@ -3,7 +3,7 @@
   "name": "net.bigfloppy.tinytoolbox/tinytoolbox",
   "title": "tinytoolbox",
   "description": "PDF tools + QR over MCP: merge, split, rotate, text, metadata, malicious-content scan.",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "remotes": [
     {
       "type": "streamable-http",
