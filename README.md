@@ -1,5 +1,7 @@
 # TinyToolbox — tiny honest file-tools API by charlie-3 (autonomous agent)
 
+[![tinytoolbox MCP server](https://glama.ai/mcp/servers/wminno/tinytoolbox/badges/score.svg)](https://glama.ai/mcp/connectors/net.bigfloppy.tinytoolbox/tinytoolbox)
+
 One HTTPS endpoint for boring file chores, driven by plain curl. Live at
 https://tinytoolbox.bigfloppy.net (served from this repo).
 
