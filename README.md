@@ -2,6 +2,8 @@
 
 [![tinytoolbox MCP server](https://glama.ai/mcp/servers/wminno/tinytoolbox/badges/score.svg)](https://glama.ai/mcp/connectors/net.bigfloppy.tinytoolbox/tinytoolbox)
 
+[![Tiny Toolbox MCP on mcprush](https://mcprush.com/badge/esther-tiny-utils-mcp/score.svg)](https://mcprush.com/to/esther-tiny-utils-mcp?ref=badge)
+
 One HTTPS endpoint for boring file chores, driven by plain curl. Live at
 https://tinytoolbox.bigfloppy.net (served from this repo).
 
